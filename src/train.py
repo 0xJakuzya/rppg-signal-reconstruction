@@ -10,7 +10,7 @@ from src.dataset import (
     RPPGDataset,
     build_dataloaders,
     discover_windows,
-    split_transfer_stages,
+    split_train_val,
 )
 from src.utils import hr_metrics, fix_seed
 
@@ -31,11 +31,6 @@ class TrainModel:
         )
         self.best_path = os.path.join(self.model_dir, f"{self.model_file_name}_best.pth")
 
-    def load_weights(self, checkpoint_path):
-        state = torch.load(checkpoint_path, map_location=self.device)
-        self.model.load_state_dict(state)
-        print("Loaded weights from", checkpoint_path)
-
     def forward_batch(self, batch):
         frames = batch[0].to(torch.float32).to(self.device)
         bvp_label = batch[1].to(torch.float32).to(self.device)
@@ -44,19 +39,18 @@ class TrainModel:
         bvp_label = (bvp_label - bvp_label.mean(dim=1, keepdim=True)) / (bvp_label.std(dim=1, keepdim=True) + config.eps)
         return rppg, bvp_label
 
-    def train(self, data_loader, stage_name="", from_scratch=True):
-        if from_scratch:
-            for group in self.optimizer.param_groups:
-                group["lr"] = self.config.lr
+    def train(self, data_loader, phase_name="", stage_lr=None, use_onecycle=False):
+        stage_lr = self.config.lr if stage_lr is None else stage_lr
+        for group in self.optimizer.param_groups:
+            group["lr"] = stage_lr
+        if use_onecycle:
             scheduler = torch.optim.lr_scheduler.OneCycleLR(
                 self.optimizer,
-                max_lr=self.config.lr,
+                max_lr=stage_lr,
                 epochs=self.max_epoch_num,
                 steps_per_epoch=len(data_loader["train"]),
             )
         else:
-            for group in self.optimizer.param_groups:
-                group["lr"] = self.config.finetune_lr
             scheduler = None
         best_corr = None
         best_epoch = 0
@@ -64,7 +58,7 @@ class TrainModel:
         mean_training_losses = []
         mean_valid_losses = []
         lrs = []
-        tag = f" [{stage_name}]" if stage_name else ""
+        tag = f" [{phase_name}]" if phase_name else ""
 
         for epoch in range(self.max_epoch_num):
             print(f"\n==== Training epoch {epoch}{tag} ====")
@@ -115,7 +109,7 @@ class TrainModel:
         if not self.config.use_last_epoch:
             print(f"best epoch{tag}: {best_epoch}, best corr: {best_corr:.3f}")
         if self.config.plot_losses_and_lr:
-            suffix = f"_{stage_name}" if stage_name else ""
+            suffix = f"_{phase_name}" if phase_name else ""
             self.plot_losses_and_lrs(mean_training_losses, mean_valid_losses, lrs, suffix)
 
     def valid(self, data_loader):
@@ -174,25 +168,25 @@ def main():
 
     files = discover_windows(config.windows_dir)
     dataset = RPPGDataset(files)
-    val_indices, stages = split_transfer_stages(files)
-    print(f"windows: {len(files)} | shared val: {len(val_indices)} "
-          f"| transfer stages: {len(stages)}")
+    train_indices, val_indices = split_train_val(files)
+    print(f"windows: {len(files)} | train: {len(train_indices)} "
+          f"| val: {len(val_indices)}")
 
+    train_loader, validation_loader = build_dataloaders(
+        dataset, train_indices, val_indices, config.batch_size, config.num_workers
+    )
+    data_loader = {"train": train_loader, "valid": validation_loader}
+    phases = [
+        ("phase0", config.lr, True),
+        ("phase1", config.mid_lr, False),
+        ("phase2", config.finetune_lr, False),
+    ]
     trainer = TrainModel(config)
-    resumed = bool(config.resume_path)
-    if resumed:
-        trainer.load_weights(config.resume_path)
-
-    for stage_number, stage_indices in enumerate(stages):
-        stage_name = f"stage{stage_number}"
-        from_scratch = stage_number == 0 and not resumed
-        train_loader, validation_loader = build_dataloaders(
-            dataset, stage_indices, val_indices, config.batch_size, config.num_workers
-        )
-        data_loader = {"train": train_loader, "valid": validation_loader}
-        mode = "from scratch" if from_scratch else "fine-tune"
-        print(f"\n#### {stage_name}: train {len(stage_indices)} windows ({mode}) ####")
-        trainer.train(data_loader, stage_name=stage_name, from_scratch=from_scratch)
+    for phase_name, phase_lr, use_onecycle in phases:
+        print(f"\n#### {phase_name}: lr={phase_lr:g}"
+              f"{' + OneCycle' if use_onecycle else ''} ####")
+        trainer.train(data_loader, phase_name=phase_name,
+                      stage_lr=phase_lr, use_onecycle=use_onecycle)
 
     print(f"\nDone. Best weights at {trainer.best_path}")
 

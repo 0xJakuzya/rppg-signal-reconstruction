@@ -16,16 +16,15 @@ def patient_id(file):
     stem = Path(file).stem
     return stem.split("_", 1)[0]
 
-def split_transfer_stages(files, val_patients=config.transfer_val_patients,
-                          group_size=config.transfer_group_size,
-                          stages=config.transfer_stages, seed=config.seed):
-                          
+def split_train_val(files, val_split=config.val_split, seed=config.seed):
     files_by_patient = {}
     for index, file in enumerate(files):
         files_by_patient.setdefault(patient_id(file), []).append(index)
 
     patients = sorted(files_by_patient)
     random.Random(seed).shuffle(patients)
+
+    val_count = max(1, round(len(patients) * val_split))
 
     def indices_of(patient_list):
         indices = []
@@ -34,48 +33,9 @@ def split_transfer_stages(files, val_patients=config.transfer_val_patients,
         indices.sort()
         return indices
 
-    val_indices = indices_of(patients[:val_patients])
-    train_patients = patients[val_patients:]
-
-    groups = []
-    for stage in range(stages):
-        stage_patients = train_patients[stage * group_size:(stage + 1) * group_size]
-        if not stage_patients:
-            break
-        groups.append(indices_of(stage_patients))
-    return val_indices, groups
-
-
-def split_by_patient(files, val_split=config.val_split, seed=config.seed):
-    files_by_patient = {}
-    for index, file in enumerate(files):
-        patient = patient_id(file)
-        if patient not in files_by_patient:
-            files_by_patient[patient] = []
-        files_by_patient[patient].append(index)
-
-    patients = sorted(files_by_patient)
-    random.Random(seed).shuffle(patients)
-
-    validation_count = int(len(patients) * val_split)
-    validation_count = max(1, validation_count)
-    validation_count = min(validation_count, len(patients) - 1)
-    validation_patients = patients[:validation_count]
-    train_patients = patients[validation_count:]
-
-    train_idx = []
-    for patient in train_patients:
-        for index in files_by_patient[patient]:
-            train_idx.append(index)
-
-    val_idx = []
-    for patient in validation_patients:
-        for index in files_by_patient[patient]:
-            val_idx.append(index)
-
-    train_idx.sort()
-    val_idx.sort()
-    return train_idx, val_idx
+    val_indices = indices_of(patients[:val_count])
+    train_indices = indices_of(patients[val_count:])
+    return train_indices, val_indices
 
 class RPPGDataset(Dataset):
     def __init__(self, files):

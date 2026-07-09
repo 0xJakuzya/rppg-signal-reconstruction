@@ -44,7 +44,14 @@ def fft_hr(signal, fps, low_hz=config.hr_lo_hz, high_hz=config.hr_hi_hz):
     band_frequencies = frequencies[in_band]
     band_power = power[in_band]
     peak_index = band_power.argmax()
-    heart_rate = band_frequencies[peak_index] * 60.0
+    peak_freq = band_frequencies[peak_index]
+    half_freq = peak_freq / 2.0
+    if half_freq >= low_hz:
+        near_half = np.abs(band_frequencies - half_freq) <= 0.1
+        if near_half.any() and band_power[near_half].max() >= 0.5 * band_power[peak_index]:
+            peak_freq = half_freq
+
+    heart_rate = peak_freq * 60.0
     return float(heart_rate)
 
 def shift_corr(prediction, target, max_shift):
