@@ -11,10 +11,3 @@ data/
 *.dat
 *.onnx
 *.log
-/results_old
-
-# MediaPipe models
-*.task
-/results
-.pth
-/result
