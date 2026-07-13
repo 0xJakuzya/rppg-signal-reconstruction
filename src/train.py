@@ -1,4 +1,5 @@
 import os
+import json
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -29,12 +30,21 @@ class TrainModel:
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=config.lr, weight_decay=config.weight_decay
         )
+        self.use_amp = self.device.type == "cuda"
+        self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
         self.best_path = os.path.join(self.model_dir, f"{self.model_file_name}_best.pth")
+
+    def load_weights(self, checkpoint_path):
+        state = torch.load(checkpoint_path, map_location=self.device)
+        self.model.load_state_dict(state)
+        print("Resumed from", checkpoint_path)
 
     def forward_batch(self, batch):
         frames = batch[0].to(torch.float32).to(self.device)
         bvp_label = batch[1].to(torch.float32).to(self.device)
-        rppg = self.model(frames)
+        with torch.autocast("cuda", enabled=self.use_amp):
+            rppg = self.model(frames)
+        rppg = rppg.float()
         rppg = (rppg - rppg.mean(dim=1, keepdim=True)) / (rppg.std(dim=1, keepdim=True) + config.eps)
         bvp_label = (bvp_label - bvp_label.mean(dim=1, keepdim=True)) / (bvp_label.std(dim=1, keepdim=True) + config.eps)
         return rppg, bvp_label
@@ -58,6 +68,7 @@ class TrainModel:
         mean_training_losses = []
         mean_valid_losses = []
         lrs = []
+        epoch_history = []
         tag = f" [{phase_name}]" if phase_name else ""
 
         for epoch in range(self.max_epoch_num):
@@ -71,10 +82,12 @@ class TrainModel:
                 loss = self.loss_model(rppg, bvp_label)
 
                 self.optimizer.zero_grad()
-                loss.backward()
+                self.scaler.scale(loss).backward()
                 if self.config.grad_clip:
+                    self.scaler.unscale_(self.optimizer)
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip)
-                self.optimizer.step()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
                 if scheduler is not None:
                     scheduler.step()
 
@@ -92,6 +105,16 @@ class TrainModel:
                 print(f"validation loss: {valid_loss:.4f} | "
                       f"HR MAE: {metrics['mae']:.2f} | RMSE: {metrics['rmse']:.2f} | "
                       f"corr: {corr:.3f}")
+                epoch_history.append({
+                    "phase": phase_name,
+                    "epoch": epoch,
+                    "lr": float(self.optimizer.param_groups[0]["lr"]),
+                    "train_loss": mean_training_losses[-1],
+                    "valid_loss": valid_loss,
+                    "hr_mae": metrics["mae"],
+                    "hr_rmse": metrics["rmse"],
+                    "corr": corr,
+                })
                 if best_corr is None or corr > best_corr:
                     best_corr = corr
                     best_epoch = epoch
@@ -111,6 +134,15 @@ class TrainModel:
         if self.config.plot_losses_and_lr:
             suffix = f"_{phase_name}" if phase_name else ""
             self.plot_losses_and_lrs(mean_training_losses, mean_valid_losses, lrs, suffix)
+        if phase_name:
+            phase_path = os.path.join(self.model_dir, f"{self.model_file_name}_{phase_name}.pth")
+            self.save_checkpoint(phase_path)
+        return {
+            "phase": phase_name,
+            "best_epoch": best_epoch,
+            "best_corr": best_corr,
+            "epochs": epoch_history,
+        }
 
     def valid(self, data_loader):
         print("\n ==== Validating ====")
@@ -162,7 +194,7 @@ class TrainModel:
         plt.close(figure)
         print("Saved training curves:", out_path)
 
-def main():
+def main(resume=None):
     fix_seed(config.seed)
     config.results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -176,20 +208,45 @@ def main():
         dataset, train_indices, val_indices, config.batch_size, config.num_workers
     )
     data_loader = {"train": train_loader, "valid": validation_loader}
-    phases = [
-        ("phase0", config.lr, True),
-        ("phase1", config.mid_lr, False),
-        ("phase2", config.finetune_lr, False),
-    ]
+
     trainer = TrainModel(config)
+    if resume:
+        trainer.load_weights(resume)
+        phases = [
+            ("phase1", config.mid_lr, False),
+            ("phase2", config.finetune_lr, False),
+        ]
+    else:
+        phases = [
+            ("phase0", config.lr, True),
+            ("phase1", config.mid_lr, False),
+            ("phase2", config.finetune_lr, False),
+        ]
+
+    history = {
+        "windows": len(files),
+        "train_windows": len(train_indices),
+        "val_windows": len(val_indices),
+        "phases": [],
+    }
     for phase_name, phase_lr, use_onecycle in phases:
         print(f"\n#### {phase_name}: lr={phase_lr:g}"
               f"{' + OneCycle' if use_onecycle else ''} ####")
-        trainer.train(data_loader, phase_name=phase_name,
-                      stage_lr=phase_lr, use_onecycle=use_onecycle)
+        phase_history = trainer.train(data_loader, phase_name=phase_name,
+                                      stage_lr=phase_lr, use_onecycle=use_onecycle)
+        history["phases"].append(phase_history)
+        history_path = os.path.join(config.model_dir, "history.json")
+        with open(history_path, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2, ensure_ascii=False)
+        print("Saved history:", history_path)
 
     print(f"\nDone. Best weights at {trainer.best_path}")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--resume", default=None,
+                        help="checkpoint .pth to continue from (fine-tune on grown data)")
+    args = parser.parse_args()
+    main(resume=args.resume)

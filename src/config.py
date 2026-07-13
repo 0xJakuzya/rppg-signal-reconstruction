@@ -8,7 +8,7 @@ dataset_roots = {
     "ubfc": Path("D:/datasets/UBFC-rPPG"),
 }
 windows_dirs = {
-    "mcd": Path("D:/datasets/data/mcd_processed_30fps_w300"),
+    "mcd": Path("C:/datasets/data/mcd_processed_30fps_w300"),
     "ubfc": Path("D:/datasets/data/ubfc_processed"),
 }
 
@@ -18,23 +18,24 @@ dataset_root = dataset_roots[train_dataset]
 windows_dir = windows_dirs[train_dataset]
 results_dir = project_root / "result"
 face_model_path = project_root / "face_landmarker.task"
+val_patients_path = results_dir / "val_patients.json"
 
 # runtime
 seed = 42
 device = "cuda"
-fps_target = 30.0    
+fps_target = 30.0
 eps = 1e-6
 
 # windowing
-window = 300              
-stride = 150          
+window = 300          
+stride = 150             
 frame_step = 1          
 video_fps = 30.0
 
 # preprocessing filters 
 detrend_lambda = 100.0
-band_lo_hz = 0.7     
-band_hi_hz = 2.5        
+band_lo_hz = 0.7       
+band_hi_hz = 2.5      
 cheby_order = 2
 cheby_rs = 40.0
 hr_lo_hz = 0.75       
@@ -49,9 +50,9 @@ data_type = "Standardized"
 label_type = "Standardized"
 
 # train
-epochs = 10               
-batch_size = 8         
-lr = 3e-4               
+epochs = 20
+batch_size = 10  
+lr = 3e-4
 mid_lr = 3e-5            
 finetune_lr = 5e-6     
 weight_decay = 1e-4
@@ -59,7 +60,7 @@ dropout = 0.2
 grad_clip = 1.0
 
 max_shift_sec = 0.33
-val_split = 0.2         
+val_split = 0.2
 num_workers = 4
 model_dir = results_dir
 model_file_name = "physnet"
