@@ -45,27 +45,20 @@ hr_hi_hz = 2.5
 face_size = 72
 face_margin_frac = 0.5
 
-# data representation
-data_type = "Standardized"
-label_type = "Standardized"
-
 # train
-epochs = 20
-batch_size = 10  
+epochs = 30
+batch_size = 10
 lr = 3e-4
-mid_lr = 3e-5            
-finetune_lr = 5e-6     
+mid_lr = 3e-5
+finetune_lr = 5e-6
 weight_decay = 1e-4
-dropout = 0.2
 grad_clip = 1.0
 
 max_shift_sec = 0.33
-val_split = 0.2
+val_split = 0.1
 num_workers = 4
 model_dir = results_dir
 model_file_name = "physnet"
-use_last_epoch = False
-plot_losses_and_lr = True
 early_stop_patience = 3
 
 # evaluation (cross-dataset hold-out)

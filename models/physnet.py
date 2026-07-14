@@ -9,7 +9,6 @@ Copyright (c) 2019
 """
 import torch.nn as nn
 import torch.nn.functional as F
-from src import config
 
 class PhysNet(nn.Module):
     """3D-CNN mapping full-face rPPG windows to a 1D BVP signal."""
@@ -86,7 +85,6 @@ class PhysNet(nn.Module):
         self.ConvBlock10 = nn.Conv3d(64, 1, [1, 1, 1], stride=1, padding=0)
         self.MaxpoolSpa = nn.MaxPool3d((1, 2, 2), stride=(1, 2, 2))
         self.MaxpoolSpaTem = nn.MaxPool3d((2, 2, 2), stride=2)
-        self.dropout = nn.Dropout3d(config.dropout)  # regularization before the head
 
     def forward(self, x):
         x = x.permute(0, 2, 1, 3, 4).contiguous()
@@ -114,7 +112,6 @@ class PhysNet(nn.Module):
         x = self.upsample2(x)  # x [64, T, 8, 8]
         
         x = F.adaptive_avg_pool3d(x, (length, 1, 1))
-        x = self.dropout(x)
         x = self.ConvBlock10(x)  # x [1, T, 1,1]
 
         rPPG = x.view(-1, length)

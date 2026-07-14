@@ -31,45 +31,14 @@ def standardize_face_window(frames):
     normalized = (frames - mean) / (standard_deviation + config.eps)
     return normalized.astype(np.float32)
 
-def diff_normalize_face_window(frames):
-    frames = frames.astype(np.float32)
-    if frames.max(initial=0.0) > 2.0:
-        frames = frames / 255.0
-    numerator = frames[1:] - frames[:-1]
-    denominator = frames[1:] + frames[:-1] + config.eps
-    diff = numerator / denominator
-    standard_deviation = diff.std()
-    if standard_deviation > config.eps:
-        diff = diff / standard_deviation
-    padded = np.zeros_like(frames)
-    padded[:-1] = diff
-    return padded.astype(np.float32)
+def prepare_frames(frames):
+    return standardize_face_window(frames)
 
-def diff_normalize_label(ppg):
-    ppg = ppg.astype(np.float32)
-    diff = ppg[1:] - ppg[:-1]
-    standard_deviation = diff.std()
-    if standard_deviation > config.eps:
-        diff = diff / standard_deviation
-    padded = np.zeros_like(ppg)
-    padded[:-1] = diff
-    return padded.astype(np.float32)
-
-def filter_label(ppg, fps):
+def prepare_label(ppg, fps):
     ppg = detrend(ppg)
     if len(ppg) >= int(fps * 2):
         ppg = bandpass_filter(ppg, fps)
     return normalize_signal(ppg)
-
-def prepare_frames(frames):
-    if config.data_type == "DiffNormalized":
-        return diff_normalize_face_window(frames)
-    return standardize_face_window(frames)
-
-def prepare_label(ppg, fps):
-    if config.label_type == "DiffNormalized":
-        return diff_normalize_label(ppg)
-    return filter_label(ppg, fps)
 
 def extract_faces(video_path, detector):
     capture = cv2.VideoCapture(str(video_path))
