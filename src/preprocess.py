@@ -82,7 +82,8 @@ def save_windows(frames, ppg, out_dir, stem, fps):
         start += config.stride
     return count
 
-def preprocess_record(record, detector, fps):
+def preprocess_record(record, detector):
+    fps = record.fps / config.frame_step
     frames, missing = extract_faces(record.video_path, detector)
     if len(frames) == 0:
         print(f"skip {record.subject_id}: no frames")
@@ -105,16 +106,15 @@ def preprocess_record(record, detector, fps):
 
 def main():
     windows_root = Path(config.windows_dir)
-    fps = config.video_fps / config.frame_step
     reader = get_dataset_reader(config.train_dataset, config.dataset_root)
     detector = FaceDetector()
     total = 0
     try:
         for record in reader.iter_records():
-            written = preprocess_record(record, detector, fps)
+            written = preprocess_record(record, detector)
             total += written
             if written:
-                print(f"{record.subject_id}: {written} windows")
+                print(f"{record.clip_id}: {written} windows @ {record.fps:.2f} fps")
     finally:
         detector.close()
     print(f"done. {total} windows -> {windows_root}")

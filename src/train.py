@@ -1,10 +1,12 @@
 import os
 import json
+import math
 import torch
 import numpy as np
 from tqdm import tqdm
 from models.loss import ShiftLoss
 from models.physnet import PhysNet
+from models.factorizephys import FactorizePhys
 from src import config
 from src.dataset import (
     RPPGDataset,
@@ -13,6 +15,17 @@ from src.dataset import (
     split_train_val,
 )
 from src.utils import hr_metrics, fix_seed
+
+ARCHITECTURES = {
+    "physnet": PhysNet,
+    "factorizephys": FactorizePhys,
+}
+
+def build_model(name):
+    if name not in ARCHITECTURES:
+        raise ValueError(f"Unknown architecture {name!r}. "
+                         f"Available: {sorted(ARCHITECTURES)}")
+    return ARCHITECTURES[name]()
 
 class TrainModel:
     def __init__(self, config):
@@ -24,12 +37,29 @@ class TrainModel:
         self.batch_size = config.batch_size
         self.fps = config.fps_target
         self.max_shift = round(config.max_shift_sec * config.fps_target)
-        self.model = PhysNet().to(self.device)
+        self.model = build_model(config.architecture).to(self.device)
+        print(f"model: {config.architecture} "
+              f"({sum(p.numel() for p in self.model.parameters()):,} params)")
         self.loss_model = ShiftLoss(self.max_shift)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+        self.scheduler = self.build_scheduler()
         self.use_amp = self.device.type == "cuda"
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
         self.best_path = os.path.join(self.model_dir, f"{self.model_file_name}_best.pth")
+
+    def build_scheduler(self):
+        warmup = self.config.warmup_epochs
+        total = self.config.epochs
+        floor = self.config.min_lr / self.config.lr
+
+        def lr_lambda(epoch):
+            if warmup > 0 and epoch < warmup:
+                return (epoch + 1) / (warmup + 1)
+            progress = (epoch - warmup) / max(1, total - warmup)
+            cosine = 0.5 * (1.0 + math.cos(math.pi * min(1.0, progress)))
+            return floor + (1.0 - floor) * cosine
+
+        return torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda)
 
     def forward_batch(self, batch):
         frames = batch[0].to(torch.float32).to(self.device)
@@ -41,7 +71,7 @@ class TrainModel:
         bvp_label = (bvp_label - bvp_label.mean(dim=1, keepdim=True)) / (bvp_label.std(dim=1, keepdim=True) + config.eps)
         return rppg, bvp_label
 
-    def train_step(self, batch, scheduler):
+    def train_step(self, batch):
         rppg, bvp_label = self.forward_batch(batch)
         loss = self.loss_model(rppg, bvp_label)
         self.optimizer.zero_grad()
@@ -51,43 +81,30 @@ class TrainModel:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip)
         self.scaler.step(self.optimizer)
         self.scaler.update()
-        if scheduler is not None:
-            scheduler.step()
         return loss
 
-    def train_epoch(self, epoch, data_loader, scheduler):
+    def train_epoch(self, epoch, data_loader):
         train_loss = []
         self.model.train()
         bar = tqdm(data_loader["train"], ncols=80)
         for batch in bar:
             bar.set_description(f"Train epoch {epoch}")
-            loss = self.train_step(batch, scheduler)
+            loss = self.train_step(batch)
             train_loss.append(loss.item())
             bar.set_postfix(loss=loss.item())
         return float(np.mean(train_loss))
 
-    def train(self, data_loader, phase_name="", stage_lr=None, use_onecycle=False):
-        stage_lr = self.config.lr if stage_lr is None else stage_lr
-        for group in self.optimizer.param_groups:
-            group["lr"] = stage_lr
-        if use_onecycle:
-            scheduler = torch.optim.lr_scheduler.OneCycleLR(
-                self.optimizer,
-                max_lr=stage_lr,
-                epochs=self.max_epoch_num,
-                steps_per_epoch=len(data_loader["train"]),
-            )
-        else:
-            scheduler = None
+    def train(self, data_loader):
         best_corr = None
         best_epoch = 0
         epochs_without_improvement = 0
         epoch_history = []
-        tag = f" [{phase_name}]" if phase_name else ""
 
         for epoch in range(self.max_epoch_num):
-            print(f"\n==== Training epoch {epoch}{tag} ====")
-            train_loss = self.train_epoch(epoch, data_loader, scheduler)
+            lr = float(self.optimizer.param_groups[0]["lr"])
+            print(f"\n==== Training epoch {epoch} (lr {lr:.2e}) ====")
+            train_loss = self.train_epoch(epoch, data_loader)
+            self.scheduler.step()
 
             valid_loss, metrics = self.valid(data_loader)
             corr = metrics["corr"]
@@ -95,9 +112,8 @@ class TrainModel:
                   f"HR MAE: {metrics['mae']:.2f} | RMSE: {metrics['rmse']:.2f} | "
                   f"corr: {corr:.3f}")
             epoch_history.append({
-                "phase": phase_name,
                 "epoch": epoch,
-                "lr": float(self.optimizer.param_groups[0]["lr"]),
+                "lr": lr,
                 "train_loss": train_loss,
                 "valid_loss": valid_loss,
                 "hr_mae": metrics["mae"],
@@ -115,15 +131,11 @@ class TrainModel:
                 print(f"No improvement for {epochs_without_improvement}"
                       f"/{self.config.early_stop_patience} epoch(s)")
                 if epochs_without_improvement >= self.config.early_stop_patience:
-                    print(f"Early stopping{tag}: corr stalled, moving on.")
+                    print("Early stopping: corr stalled.")
                     break
 
-        print(f"best epoch{tag}: {best_epoch}, best corr: {best_corr:.3f}")
-        if phase_name:
-            phase_path = os.path.join(self.model_dir, f"{self.model_file_name}_{phase_name}.pth")
-            self.save_checkpoint(phase_path)
+        print(f"\nbest epoch: {best_epoch}, best corr: {best_corr:.3f}")
         return {
-            "phase": phase_name,
             "best_epoch": best_epoch,
             "best_corr": best_corr,
             "epochs": epoch_history,
@@ -158,7 +170,8 @@ class TrainModel:
 
 def main():
     fix_seed(config.seed)
-    config.results_dir.mkdir(parents=True, exist_ok=True)
+    config.run_dir.mkdir(parents=True, exist_ok=True)
+    print(f"run dir: {config.run_dir}")
 
     files = discover_windows(config.windows_dir)
     dataset = RPPGDataset(files)
@@ -172,28 +185,31 @@ def main():
     data_loader = {"train": train_loader, "valid": validation_loader}
 
     trainer = TrainModel(config)
-    phases = [
-        ("phase0", config.lr, True),
-        ("phase1", config.mid_lr, False),
-        ("phase2", config.finetune_lr, False),
-    ]
+    run_history = trainer.train(data_loader)
 
     history = {
+        "architecture": config.architecture,
+        "params": sum(p.numel() for p in trainer.model.parameters()),
         "windows": len(files),
         "train_windows": len(train_indices),
         "val_windows": len(val_indices),
-        "phases": [],
+        "hyperparams": {
+            "epochs": config.epochs,
+            "batch_size": config.batch_size,
+            "lr": config.lr,
+            "min_lr": config.min_lr,
+            "warmup_epochs": config.warmup_epochs,
+            "weight_decay": config.weight_decay,
+            "grad_clip": config.grad_clip,
+            "window": config.window,
+            "max_shift_sec": config.max_shift_sec,
+        },
+        **run_history,
     }
-    for phase_name, phase_lr, use_onecycle in phases:
-        print(f"\n#### {phase_name}: lr={phase_lr:g}"
-              f"{' + OneCycle' if use_onecycle else ''} ####")
-        phase_history = trainer.train(data_loader, phase_name=phase_name,
-                                      stage_lr=phase_lr, use_onecycle=use_onecycle)
-        history["phases"].append(phase_history)
-        history_path = os.path.join(config.model_dir, "history.json")
-        with open(history_path, "w", encoding="utf-8") as f:
-            json.dump(history, f, indent=2, ensure_ascii=False)
-        print("Saved history:", history_path)
+    history_path = config.run_dir / config.history_file_name
+    with open(history_path, "w", encoding="utf-8") as f:
+        json.dump(history, f, indent=2, ensure_ascii=False)
+    print("Saved history:", history_path)
 
     print(f"\nDone. Best weights at {trainer.best_path}")
 

@@ -3,9 +3,9 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from models.physnet import PhysNet
 from src import config
 from src.dataset import RPPGDataset, discover_windows
+from src.train import build_model
 from src.utils import hr_metrics
 
 
@@ -17,9 +17,10 @@ def main(model_path=None):
     files = discover_windows(config.eval_windows_dir)
     print(f"eval dataset: {config.eval_dataset} | windows: {len(files)}")
 
-    model = PhysNet().to(device)
+    model = build_model(config.architecture).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
+    print(f"model: {config.architecture} | weights: {model_path}")
 
     loader = DataLoader(
         RPPGDataset(files),
