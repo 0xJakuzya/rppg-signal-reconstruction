@@ -7,6 +7,7 @@ from tqdm import tqdm
 from models.loss import ShiftLoss
 from models.physnet import PhysNet
 from models.factorizephys import FactorizePhys
+from models.ibvpnet import iBVPNet
 from src import config
 from src.dataset import (
     RPPGDataset,
@@ -19,6 +20,7 @@ from src.utils import hr_metrics, fix_seed
 ARCHITECTURES = {
     "physnet": PhysNet,
     "factorizephys": FactorizePhys,
+    "ibvpnet": iBVPNet,
 }
 
 def build_model(name):
@@ -202,6 +204,8 @@ def main():
             "weight_decay": config.weight_decay,
             "grad_clip": config.grad_clip,
             "window": config.window,
+            "crop_window": config.crop_window,
+            "crop_random": config.crop_random,
             "max_shift_sec": config.max_shift_sec,
         },
         **run_history,
