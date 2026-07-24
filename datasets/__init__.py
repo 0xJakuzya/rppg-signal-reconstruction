@@ -8,10 +8,10 @@ READERS = {
     "mcd": MCDReader,
 }
 
-def get_dataset_reader(name: str, root: Path) -> DatasetReader:
+def get_dataset_reader(name: str, root: Path, **kwargs) -> DatasetReader:
     key = name.lower()
     if key not in READERS:
         raise ValueError(f"unknown dataset '{name}', expected one of {sorted(READERS)}")
-    return READERS[key](root)
+    return READERS[key](root, **kwargs)
 
 __all__ = ["DatasetReader", "Record", "UBFCReader", "MCDReader", "get_dataset_reader"]

@@ -24,13 +24,11 @@ def load_val_patients(path=config.val_patients_path):
             return set(json.load(f))
     return None
 
-
 def save_val_patients(patients, path=config.val_patients_path):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(sorted(patients), f, indent=2)
-
 
 def split_train_val(files, val_split=config.val_split, seed=config.seed):
     files_by_patient = {}
@@ -41,11 +39,10 @@ def split_train_val(files, val_split=config.val_split, seed=config.seed):
     if val_patients is None:
         shuffled = list(present)
         random.Random(seed).shuffle(shuffled)
-        val_count = max(1, round(len(shuffled) * val_split))
+        val_count = max(1, round(len(shuffled) * val_split)) # 0.1% -> 60 patients
         val_patients = set(shuffled[:val_count])
         save_val_patients(val_patients)
-        print(f"Fixed validation set created: {len(val_patients)} patients "
-              f"-> {config.val_patients_path}")
+        print(f"Fixed validation set created: {len(val_patients)} patients")
 
     def indices_of(patient_list):
         indices = []
@@ -58,25 +55,17 @@ def split_train_val(files, val_split=config.val_split, seed=config.seed):
     train_present = [p for p in present if p not in val_patients]
     return indices_of(train_present), indices_of(val_present)
 
-class RPPGDataset(Dataset):
-    def __init__(self, files):
-        self.files = []
-        for file in files:
-            self.files.append(str(file))
-
-    def __len__(self):
-        return len(self.files)
-
-    def __getitem__(self, index):
-        with np.load(self.files[index]) as sample:
-            frames = torch.from_numpy(sample["frames"]).float() 
-            ppg = torch.from_numpy(sample["ppg"]).float()      
-        frames = frames.permute(0, 3, 1, 2).contiguous()       
-        return frames, ppg
-
 def build_dataloaders(dataset, train_idx, val_idx, batch_size, num_workers):
     pin_memory = torch.cuda.is_available()
     persistent = num_workers > 0
+
+    val_dataset = RPPGDataset(
+        dataset.files,
+        crop=dataset.crop,
+        random_crop=False,
+        color_order=dataset.color_order,
+    )
+
     train_loader = DataLoader(
         Subset(dataset, train_idx),
         batch_size=batch_size,
@@ -86,11 +75,36 @@ def build_dataloaders(dataset, train_idx, val_idx, batch_size, num_workers):
         shuffle=True,
     )
     validation_loader = DataLoader(
-        Subset(dataset, val_idx),
+        Subset(val_dataset, val_idx),
         batch_size=batch_size,
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=persistent,
         shuffle=False,
     )
+    
     return train_loader, validation_loader
+
+class RPPGDataset(Dataset):
+    def __init__(self, files, crop="config", random_crop="config", color_order="config"):
+        self.files = []
+        for file in files:
+            self.files.append(str(file))
+        self.crop = config.crop_window if crop == "config" else crop
+        self.random_crop = config.crop_random if random_crop == "config" else random_crop
+        self.color_order = (config.color_order if color_order == "config" else color_order).lower()
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, index):
+        with np.load(self.files[index]) as sample:
+            frames = torch.from_numpy(sample["frames"]).float()
+            ppg = torch.from_numpy(sample["ppg"]).float()
+        start, end = self.crop_bounds(frames.shape[0])
+        frames = frames[start:end]
+        ppg = ppg[start:end]
+        if self.color_order == "rgb":
+            frames = frames[..., [2, 1, 0]]
+        frames = frames.permute(0, 3, 1, 2).contiguous()
+        return frames, ppg

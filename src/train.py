@@ -8,6 +8,7 @@ from models.loss import ShiftLoss
 from models.physnet import PhysNet
 from models.factorizephys import FactorizePhys
 from models.ibvpnet import iBVPNet
+from models.rhythmformer import RhythmFormer
 from src import config
 from src.dataset import (
     RPPGDataset,
@@ -21,6 +22,7 @@ ARCHITECTURES = {
     "physnet": PhysNet,
     "factorizephys": FactorizePhys,
     "ibvpnet": iBVPNet,
+    "rhythmformer": RhythmFormer,
 }
 
 def build_model(name):
@@ -196,6 +198,11 @@ def main():
         "train_windows": len(train_indices),
         "val_windows": len(val_indices),
         "hyperparams": {
+            "dataset": config.train_dataset,
+            "cameras": config.cameras,
+            "fps": config.fps_target,
+            "face_size": config.face_size,
+            "color_order": config.color_order,
             "epochs": config.epochs,
             "batch_size": config.batch_size,
             "lr": config.lr,
@@ -204,10 +211,21 @@ def main():
             "weight_decay": config.weight_decay,
             "grad_clip": config.grad_clip,
             "window": config.window,
-            "crop_window": config.crop_window,
-            "crop_random": config.crop_random,
+            "stride": config.stride,
             "max_shift_sec": config.max_shift_sec,
         },
+        "model_hyperparams": {
+            "embed_dims": config.rf_embed_dims,
+            "depths": config.rf_depths,
+            "temporal_patches": config.rf_temporal_patches,
+            "topks": config.rf_topks,
+            "mlp_ratios": config.rf_mlp_ratios,
+            "head_dim": config.rf_head_dim,
+            "side_kernel": config.rf_side_kernel,
+            "drop_path_rate": config.rf_drop_path_rate,
+            "appearance_weight": config.rf_appearance_weight,
+            "difference_weight": config.rf_difference_weight,
+        } if config.architecture == "rhythmformer" else {},
         **run_history,
     }
     history_path = config.run_dir / config.history_file_name

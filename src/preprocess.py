@@ -31,9 +31,6 @@ def standardize_face_window(frames):
     normalized = (frames - mean) / (standard_deviation + config.eps)
     return normalized.astype(np.float32)
 
-def prepare_frames(frames):
-    return standardize_face_window(frames)
-
 def prepare_label(ppg, fps):
     ppg = detrend(ppg)
     if len(ppg) >= int(fps * 2):
@@ -66,18 +63,13 @@ def save_windows(frames, ppg, out_dir, stem, fps):
     frames = frames[:length]
     ppg = ppg[:length]
     out_dir.mkdir(parents=True, exist_ok=True)
-
     count = 0
     start = 0
     while start <= length - config.window:
         end = start + config.window
-        window_frames = prepare_frames(frames[start:end])
+        window_frames = standardize_face_window(frames[start:end])
         window_ppg = prepare_label(ppg[start:end], fps)
-        np.savez_compressed(
-            out_dir / f"{stem}_{start:05d}.npz",
-            frames=window_frames,
-            ppg=window_ppg,
-        )
+        np.savez_compressed(out_dir / f"{stem}_{start:05d}.npz", frames=window_frames, ppg=window_ppg)
         count += 1
         start += config.stride
     return count
@@ -103,22 +95,32 @@ def preprocess_record(record, detector):
     out_dir = Path(config.windows_dir) / record.subject_id
     return save_windows(frames, ppg, out_dir, record.clip_id, fps)
 
-
 def main():
     windows_root = Path(config.windows_dir)
-    reader = get_dataset_reader(config.train_dataset, config.dataset_root)
+    reader_kwargs = {}
+    if config.cameras:
+        reader_kwargs["cameras"] = config.cameras
+    reader = get_dataset_reader(config.train_dataset, config.dataset_root, **reader_kwargs)
+
     detector = FaceDetector()
     total = 0
+    skipped = 0
     try:
         for record in reader.iter_records():
+            if config.start_subject is not None:
+                if int(record.subject_id) < int(config.start_subject):
+                    continue
+            out_dir = windows_root / record.subject_id
+            if config.skip_existing and any(out_dir.glob(f"{record.clip_id}_*.npz")):
+                skipped += 1
+                continue
             written = preprocess_record(record, detector)
             total += written
             if written:
                 print(f"{record.clip_id}: {written} windows @ {record.fps:.2f} fps")
     finally:
         detector.close()
-    print(f"done. {total} windows -> {windows_root}")
-
+    print(f"done. {total} new windows ({skipped} clips already present) -> {windows_root}")
 
 if __name__ == "__main__":
     main()

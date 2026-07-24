@@ -9,6 +9,7 @@ class Record:
     subject_id: str
     clip_id: str
     video_path: Path
+    fps: float                      # true rate of this clip, not a dataset-wide constant
     load_ppg: Callable[[int, float], np.ndarray]
 
 class DatasetReader(ABC):
