@@ -6,9 +6,6 @@ import numpy as np
 from tqdm import tqdm
 from models.loss import ShiftLoss
 from models.physnet import PhysNet
-from models.factorizephys import FactorizePhys
-from models.ibvpnet import iBVPNet
-from models.rhythmformer import RhythmFormer
 from src import config
 from src.dataset import (
     RPPGDataset,
@@ -17,19 +14,6 @@ from src.dataset import (
     split_train_val,
 )
 from src.utils import hr_metrics, fix_seed
-
-ARCHITECTURES = {
-    "physnet": PhysNet,
-    "factorizephys": FactorizePhys,
-    "ibvpnet": iBVPNet,
-    "rhythmformer": RhythmFormer,
-}
-
-def build_model(name):
-    if name not in ARCHITECTURES:
-        raise ValueError(f"Unknown architecture {name!r}. "
-                         f"Available: {sorted(ARCHITECTURES)}")
-    return ARCHITECTURES[name]()
 
 class TrainModel:
     def __init__(self, config):
@@ -41,8 +25,8 @@ class TrainModel:
         self.batch_size = config.batch_size
         self.fps = config.fps_target
         self.max_shift = round(config.max_shift_sec * config.fps_target)
-        self.model = build_model(config.architecture).to(self.device)
-        print(f"model: {config.architecture} "
+        self.model = PhysNet().to(self.device)
+        print(f"model: PhysNet "
               f"({sum(p.numel() for p in self.model.parameters()):,} params)")
         self.loss_model = ShiftLoss(self.max_shift)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
@@ -192,7 +176,7 @@ def main():
     run_history = trainer.train(data_loader)
 
     history = {
-        "architecture": config.architecture,
+        "architecture": "physnet",
         "params": sum(p.numel() for p in trainer.model.parameters()),
         "windows": len(files),
         "train_windows": len(train_indices),
@@ -214,18 +198,6 @@ def main():
             "stride": config.stride,
             "max_shift_sec": config.max_shift_sec,
         },
-        "model_hyperparams": {
-            "embed_dims": config.rf_embed_dims,
-            "depths": config.rf_depths,
-            "temporal_patches": config.rf_temporal_patches,
-            "topks": config.rf_topks,
-            "mlp_ratios": config.rf_mlp_ratios,
-            "head_dim": config.rf_head_dim,
-            "side_kernel": config.rf_side_kernel,
-            "drop_path_rate": config.rf_drop_path_rate,
-            "appearance_weight": config.rf_appearance_weight,
-            "difference_weight": config.rf_difference_weight,
-        } if config.architecture == "rhythmformer" else {},
         **run_history,
     }
     history_path = config.run_dir / config.history_file_name

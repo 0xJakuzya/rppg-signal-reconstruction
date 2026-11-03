@@ -1,9 +1,6 @@
 from datetime import datetime
 from pathlib import Path
 
-# model: "physnet" | "factorizephys" | "ibvpnet" | "rhythmformer"
-architecture = "physnet"
-
 # datasets
 train_dataset = "mcd"
 eval_dataset = "ubfc"
@@ -22,11 +19,11 @@ dataset_root = dataset_roots[train_dataset]
 windows_dir = windows_dirs[train_dataset]
 results_dir = project_root / "result"
 face_model_path = project_root / "face_landmarker.task"
-model_results_dir = results_dir / architecture
+model_results_dir = results_dir / "physnet"
 run_dir = model_results_dir / datetime.now().strftime("%d.%m.%Y")
 val_patients_path = results_dir / "val_patients.json"
 model_dir = run_dir
-model_file_name = architecture
+model_file_name = "physnet"
 history_file_name = "history.json"
 
 # preprocessing
@@ -53,42 +50,9 @@ fps_target = 30.0
 eps = 1e-6
 color_order = "rgb"
 
-# factorizephys
-fp_channels = [8, 12, 16]
-fp_dropout = 0.1
-fp_in_channels = 3
-fp_use_fsam = True
-fp_md_steps = 4
-fp_md_rank = 2
-fp_md_slices = 1
-fp_md_residual = True
-fp_align_channels = fp_channels[2] // 2
-
-# ibvpnet
-ibvp_channels = [8, 16, 24, 40, 64]
-ibvp_in_channels = 3
-
-# RhythmFormer
-rf_embed_dims = [64, 64, 64]
-rf_depths = [2, 2, 2]
-rf_temporal_patches = [2, 4, 8]
-rf_topks = [80, 80, 80]
-rf_mlp_ratios = [1.5, 1.5, 1.5]
-rf_head_dim = 16
-rf_side_kernel = 3
-rf_drop_path_rate = 0.0
-rf_appearance_weight = 0.5
-rf_difference_weight = 0.5
-
 # train
 epochs = 100
-batch_sizes = {
-    "physnet": 10,
-    "factorizephys": 10,
-    "ibvpnet": 10,
-    "rhythmformer": 6,
-}
-batch_size = batch_sizes[architecture]
+batch_size = 10
 lr = 1e-4
 weight_decay = 1e-4
 grad_clip = 1.0

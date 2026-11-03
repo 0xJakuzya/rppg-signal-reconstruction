@@ -61,8 +61,6 @@ def build_dataloaders(dataset, train_idx, val_idx, batch_size, num_workers):
 
     val_dataset = RPPGDataset(
         dataset.files,
-        crop=dataset.crop,
-        random_crop=False,
         color_order=dataset.color_order,
     )
 
@@ -86,12 +84,10 @@ def build_dataloaders(dataset, train_idx, val_idx, batch_size, num_workers):
     return train_loader, validation_loader
 
 class RPPGDataset(Dataset):
-    def __init__(self, files, crop="config", random_crop="config", color_order="config"):
+    def __init__(self, files, color_order="config"):
         self.files = []
         for file in files:
             self.files.append(str(file))
-        self.crop = config.crop_window if crop == "config" else crop
-        self.random_crop = config.crop_random if random_crop == "config" else random_crop
         self.color_order = (config.color_order if color_order == "config" else color_order).lower()
 
     def __len__(self):
@@ -101,9 +97,6 @@ class RPPGDataset(Dataset):
         with np.load(self.files[index]) as sample:
             frames = torch.from_numpy(sample["frames"]).float()
             ppg = torch.from_numpy(sample["ppg"]).float()
-        start, end = self.crop_bounds(frames.shape[0])
-        frames = frames[start:end]
-        ppg = ppg[start:end]
         if self.color_order == "rgb":
             frames = frames[..., [2, 1, 0]]
         frames = frames.permute(0, 3, 1, 2).contiguous()
