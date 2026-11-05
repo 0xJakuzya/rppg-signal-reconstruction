@@ -8,12 +8,8 @@ from src import config
 class FaceDetector:
     def __init__(self):
         base_options = mp_python.BaseOptions(model_asset_path=str(config.face_model_path))
-        options = vision.FaceLandmarkerOptions(
-            base_options=base_options,
-            num_faces=1,
-            min_face_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
+        options = vision.FaceLandmarkerOptions(base_options=base_options, num_faces=1, min_face_detection_confidence=0.5, 
+                                               min_tracking_confidence=0.5)
         self.landmarker = vision.FaceLandmarker.create_from_options(options)
 
     def landmarks(self, frame):

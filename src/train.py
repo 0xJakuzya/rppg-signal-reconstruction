@@ -7,12 +7,7 @@ from tqdm import tqdm
 from models.loss import ShiftLoss
 from models.physnet import PhysNet
 from src import config
-from src.dataset import (
-    RPPGDataset,
-    build_dataloaders,
-    discover_windows,
-    split_train_val,
-)
+from src.dataset import RPPGDataset, build_dataloaders, discover_windows, split_train_val
 from src.utils import hr_metrics, fix_seed
 
 class TrainModel:
@@ -26,13 +21,11 @@ class TrainModel:
         self.fps = config.fps_target
         self.max_shift = round(config.max_shift_sec * config.fps_target)
         self.model = PhysNet().to(self.device)
-        print(f"model: PhysNet "
-              f"({sum(p.numel() for p in self.model.parameters()):,} params)")
         self.loss_model = ShiftLoss(self.max_shift)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
         self.scheduler = self.build_scheduler()
         self.use_amp = self.device.type == "cuda"
-        self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
+        self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp) # FP16 for training/inference optimization
         self.best_path = os.path.join(self.model_dir, f"{self.model_file_name}_best.pth")
 
     def build_scheduler(self):
@@ -90,15 +83,14 @@ class TrainModel:
 
         for epoch in range(self.max_epoch_num):
             lr = float(self.optimizer.param_groups[0]["lr"])
-            print(f"\n==== Training epoch {epoch} (lr {lr:.2e}) ====")
+            print(f"training epoch {epoch} (lr {lr:.2e})")
             train_loss = self.train_epoch(epoch, data_loader)
             self.scheduler.step()
 
             valid_loss, metrics = self.valid(data_loader)
             corr = metrics["corr"]
-            print(f"validation loss: {valid_loss:.4f} | "
-                  f"HR MAE: {metrics['mae']:.2f} | RMSE: {metrics['rmse']:.2f} | "
-                  f"corr: {corr:.3f}")
+            print(f"validation loss: {valid_loss:.4f} | HR MAE: {metrics['mae']:.2f} | RMSE: {metrics['rmse']:.2f} corr: {corr:.3f}")
+
             epoch_history.append({
                 "epoch": epoch,
                 "lr": lr,
@@ -108,21 +100,22 @@ class TrainModel:
                 "hr_rmse": metrics["rmse"],
                 "corr": corr,
             })
+
             if best_corr is None or corr > best_corr:
                 best_corr = corr
                 best_epoch = epoch
                 epochs_without_improvement = 0
                 self.save_checkpoint(self.best_path)
-                print(f"Update best model! Best epoch: {best_epoch} (corr {corr:.3f})")
+                print(f"update best model! best epoch: {best_epoch} (corr {corr:.3f})")
             else:
                 epochs_without_improvement += 1
-                print(f"No improvement for {epochs_without_improvement}"
-                      f"/{self.config.early_stop_patience} epoch(s)")
+                print(f"No improvement for {epochs_without_improvement} {self.config.early_stop_patience} epoch(s)")
                 if epochs_without_improvement >= self.config.early_stop_patience:
-                    print("Early stopping: corr stalled.")
+                    print("early stopping: corr stalled.")
                     break
 
-        print(f"\nbest epoch: {best_epoch}, best corr: {best_corr:.3f}")
+        print(f"best epoch: {best_epoch}, best corr: {best_corr:.3f}")
+        
         return {
             "best_epoch": best_epoch,
             "best_corr": best_corr,
@@ -130,7 +123,7 @@ class TrainModel:
         }
 
     def valid(self, data_loader):
-        print("\n ==== Validating ====")
+        print("validating")
         self.model.eval()
         valid_loss = []
         all_predictions = []
@@ -138,7 +131,7 @@ class TrainModel:
         with torch.no_grad():
             bar = tqdm(data_loader["valid"], ncols=80)
             for batch in bar:
-                bar.set_description("Validation")
+                bar.set_description("validation")
                 rppg, bvp_label = self.forward_batch(batch)
                 loss = self.loss_model(rppg, bvp_label)
                 valid_loss.append(loss.item())
@@ -164,12 +157,9 @@ def main():
     files = discover_windows(config.windows_dir)
     dataset = RPPGDataset(files)
     train_indices, val_indices = split_train_val(files)
-    print(f"windows: {len(files)} | train: {len(train_indices)} "
-          f"| val: {len(val_indices)}")
+    print(f"windows: {len(files)} | train: {len(train_indices)} | val: {len(val_indices)}")
 
-    train_loader, validation_loader = build_dataloaders(
-        dataset, train_indices, val_indices, config.batch_size, config.num_workers
-    )
+    train_loader, validation_loader = build_dataloaders(dataset, train_indices, val_indices, config.batch_size, config.num_workers)
     data_loader = {"train": train_loader, "valid": validation_loader}
 
     trainer = TrainModel(config)
@@ -203,9 +193,9 @@ def main():
     history_path = config.run_dir / config.history_file_name
     with open(history_path, "w", encoding="utf-8") as f:
         json.dump(history, f, indent=2, ensure_ascii=False)
-    print("Saved history:", history_path)
+    print("saved history:", history_path)
 
-    print(f"\nDone. Best weights at {trainer.best_path}")
+    print(f"done. best weights at {trainer.best_path}")
 
 
 if __name__ == "__main__":

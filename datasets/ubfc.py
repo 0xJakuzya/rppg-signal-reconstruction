@@ -3,10 +3,9 @@ from typing import Iterator
 import numpy as np
 from datasets.base import DatasetReader, Record
 
-UBFC_FPS = 30.0
+ubfc_fps = 30.0
 
 class UBFCReader(DatasetReader):
-    """UBFC-rPPG layout: subjectN/{vid.avi, ground_truth.txt}."""
 
     def __init__(self, root: Path):
         self.root = Path(root)
@@ -27,7 +26,7 @@ class UBFCReader(DatasetReader):
                 subject_id=subject_dir.name,
                 clip_id=subject_dir.name,
                 video_path=video_path,
-                fps=UBFC_FPS,
+                fps=ubfc_fps,
                 load_ppg=self.make_ppg_loader(ground_truth_path),
             )
 

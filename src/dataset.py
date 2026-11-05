@@ -39,7 +39,7 @@ def split_train_val(files, val_split=config.val_split, seed=config.seed):
     if val_patients is None:
         shuffled = list(present)
         random.Random(seed).shuffle(shuffled)
-        val_count = max(1, round(len(shuffled) * val_split)) # 0.1% -> 60 patients
+        val_count = max(1, round(len(shuffled) * val_split))
         val_patients = set(shuffled[:val_count])
         save_val_patients(val_patients)
         print(f"Fixed validation set created: {len(val_patients)} patients")
@@ -56,31 +56,9 @@ def split_train_val(files, val_split=config.val_split, seed=config.seed):
     return indices_of(train_present), indices_of(val_present)
 
 def build_dataloaders(dataset, train_idx, val_idx, batch_size, num_workers):
-    pin_memory = torch.cuda.is_available()
-    persistent = num_workers > 0
-
-    val_dataset = RPPGDataset(
-        dataset.files,
-        color_order=dataset.color_order,
-    )
-
-    train_loader = DataLoader(
-        Subset(dataset, train_idx),
-        batch_size=batch_size,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        persistent_workers=persistent,
-        shuffle=True,
-    )
-    validation_loader = DataLoader(
-        Subset(val_dataset, val_idx),
-        batch_size=batch_size,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        persistent_workers=persistent,
-        shuffle=False,
-    )
-    
+    val_dataset = RPPGDataset(dataset.files, color_order=dataset.color_order)
+    train_loader = DataLoader(Subset(dataset, train_idx), batch_size=batch_size, num_workers=num_workers, shuffle=True)
+    validation_loader = DataLoader(Subset(val_dataset, val_idx), batch_size=batch_size, num_workers=num_workers, shuffle=False,)
     return train_loader, validation_loader
 
 class RPPGDataset(Dataset):

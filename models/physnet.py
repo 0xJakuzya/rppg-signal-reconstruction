@@ -1,119 +1,61 @@
-""" PhysNet
-orginal source: 
-Remote Photoplethysmograph Signal Measurement from Facial Videos Using Spatio-Temporal Networks
-British Machine Vision Conference (BMVC)} 2019,
-By Zitong Yu, 2019/05/05
-Only for research purpose, and commercial use is not allowed.
-MIT License
-Copyright (c) 2019
-"""
 import torch.nn as nn
 import torch.nn.functional as F
 
+class Conv(nn.Sequential):
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1):
+        super().__init__(
+            nn.Conv3d(in_channels, out_channels, kernel_size, padding=padding),
+            nn.BatchNorm3d(out_channels),
+            nn.ReLU(inplace=True),
+        )
+
 class PhysNet(nn.Module):
-    """3D-CNN mapping full-face rPPG windows to a 1D BVP signal."""
     def __init__(self):
-        super(PhysNet, self).__init__()
-        self.ConvBlock1 = nn.Sequential(
-            nn.Conv3d(3, 16, [1, 5, 5], stride=1, padding=[0, 2, 2]),
-            nn.BatchNorm3d(16),
-            nn.ReLU(inplace=True),
-        )
-
-        self.ConvBlock2 = nn.Sequential(
-            nn.Conv3d(16, 32, [3, 3, 3], stride=1, padding=1),
-            nn.BatchNorm3d(32),
-            nn.ReLU(inplace=True),
-        )
-
-        self.ConvBlock3 = nn.Sequential(
-            nn.Conv3d(32, 64, [3, 3, 3], stride=1, padding=1),
-            nn.BatchNorm3d(64),
-            nn.ReLU(inplace=True),
-        )
-
-        self.ConvBlock4 = nn.Sequential(
-            nn.Conv3d(64, 64, [3, 3, 3], stride=1, padding=1),
-            nn.BatchNorm3d(64),
-            nn.ReLU(inplace=True),
-        )
-
-        self.ConvBlock5 = nn.Sequential(
-            nn.Conv3d(64, 64, [3, 3, 3], stride=1, padding=1),
-            nn.BatchNorm3d(64),
-            nn.ReLU(inplace=True),
-        )
-
-        self.ConvBlock6 = nn.Sequential(
-            nn.Conv3d(64, 64, [3, 3, 3], stride=1, padding=1),
-            nn.BatchNorm3d(64),
-            nn.ReLU(inplace=True),
-        )
-
-        self.ConvBlock7 = nn.Sequential(
-            nn.Conv3d(64, 64, [3, 3, 3], stride=1, padding=1),
-            nn.BatchNorm3d(64),
-            nn.ReLU(inplace=True),
-        )
-
-        self.ConvBlock8 = nn.Sequential(
-            nn.Conv3d(64, 64, [3, 3, 3], stride=1, padding=1),
-            nn.BatchNorm3d(64),
-            nn.ReLU(inplace=True),
-        )
-
-        self.ConvBlock9 = nn.Sequential(
-            nn.Conv3d(64, 64, [3, 3, 3], stride=1, padding=1),
-            nn.BatchNorm3d(64),
-            nn.ReLU(inplace=True),
-        )
-
-        self.upsample = nn.Sequential(
-            nn.ConvTranspose3d(in_channels=64, out_channels=64, kernel_size=[
-                4, 1, 1], stride=[2, 1, 1], padding=[1, 0, 0]),  # [1, 128, 32]
-            nn.BatchNorm3d(64),
-            nn.ELU(),
-        )
-
-        self.upsample2 = nn.Sequential(
-            nn.ConvTranspose3d(in_channels=64, out_channels=64, kernel_size=[
-                4, 1, 1], stride=[2, 1, 1], padding=[1, 0, 0]),  # [1, 128, 32]
-            nn.BatchNorm3d(64),
-            nn.ELU(),
-        )
-
-        self.ConvBlock10 = nn.Conv3d(64, 1, [1, 1, 1], stride=1, padding=0)
+        super().__init__()
+        self.ConvBlock1 = Conv(3, 16, (1, 5, 5), (0, 2, 2))
+        self.ConvBlock2 = Conv(16, 32)
+        self.ConvBlock3 = Conv(32, 64)
+        self.ConvBlock4 = Conv(64, 64)
+        self.ConvBlock5 = Conv(64, 64)
+        self.ConvBlock6 = Conv(64, 64)
+        self.ConvBlock7 = Conv(64, 64)
+        self.ConvBlock8 = Conv(64, 64)
+        self.ConvBlock9 = Conv(64, 64)
         self.MaxpoolSpa = nn.MaxPool3d((1, 2, 2), stride=(1, 2, 2))
         self.MaxpoolSpaTem = nn.MaxPool3d((2, 2, 2), stride=2)
+        self.upsample = nn.Sequential(
+            nn.ConvTranspose3d(64, 64, (4, 1, 1), stride=(2, 1, 1), padding=(1, 0, 0)),
+            nn.BatchNorm3d(64),
+            nn.ELU(),
+        )
+        self.upsample2 = nn.Sequential(
+            nn.ConvTranspose3d(64, 64, (4, 1, 1), stride=(2, 1, 1), padding=(1, 0, 0)),
+            nn.BatchNorm3d(64),
+            nn.ELU(),
+        )
+        self.ConvBlock10 = nn.Conv3d(64, 1, 1)
 
     def forward(self, x):
         x = x.permute(0, 2, 1, 3, 4).contiguous()
         length = x.shape[2]
-
-        x = self.ConvBlock1(x)  # x [3, T, 128,128]
-        x = self.MaxpoolSpa(x)  # x [16, T, 64,64]
-
-        x = self.ConvBlock2(x)  # x [32, T, 64,64]
-        x_visual6464 = self.ConvBlock3(x)  # x [32, T, 64,64]
-        # x [32, T/2, 32,32]    Temporal halve
-        x = self.MaxpoolSpaTem(x_visual6464)
-
-        x = self.ConvBlock4(x)  # x [64, T/2, 32,32]
-        x_visual3232 = self.ConvBlock5(x)  # x [64, T/2, 32,32]
-        x = self.MaxpoolSpaTem(x_visual3232)  # x [64, T/4, 16,16]
-
-        x = self.ConvBlock6(x)  # x [64, T/4, 16,16]
-        x_visual1616 = self.ConvBlock7(x)  # x [64, T/4, 16,16]
-        x = self.MaxpoolSpa(x_visual1616)  # x [64, T/4, 8,8]
-
-        x = self.ConvBlock8(x)  # x [64, T/4, 8, 8]
-        x = self.ConvBlock9(x)  # x [64, T/4, 8, 8]
-        x = self.upsample(x)  # x [64, T/2, 8, 8]
-        x = self.upsample2(x)  # x [64, T, 8, 8]
         
+        x = self.MaxpoolSpa(self.ConvBlock1(x))
+        x = self.ConvBlock2(x)
+        x = self.MaxpoolSpaTem(self.ConvBlock3(x))
+
+        x = self.ConvBlock4(x)
+        x = self.MaxpoolSpaTem(self.ConvBlock5(x))
+
+        x = self.ConvBlock6(x)
+        x = self.MaxpoolSpa(self.ConvBlock7(x))
+
+        x = self.ConvBlock8(x)
+        x = self.ConvBlock9(x)
+
+        x = self.upsample(x)
+        x = self.upsample2(x)
+
         x = F.adaptive_avg_pool3d(x, (length, 1, 1))
-        x = self.ConvBlock10(x)  # x [1, T, 1,1]
+        x = self.ConvBlock10(x)
 
-        rPPG = x.view(-1, length)
-
-        return rPPG
+        return x.view(-1, length)

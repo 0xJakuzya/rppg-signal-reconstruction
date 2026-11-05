@@ -6,7 +6,6 @@ from src import config
 from src.face_detector import FaceDetector
 from src.utils import bandpass_filter, detrend, normalize_signal
 
-
 def missing_face():
     shape = (config.face_size, config.face_size, 3)
     return np.full(shape, np.nan, np.float32)
@@ -99,27 +98,34 @@ def main():
     windows_root = Path(config.windows_dir)
     reader_kwargs = {}
     if config.cameras:
-        reader_kwargs["cameras"] = config.cameras
+        reader_kwargs["cameras"] = config.cameras # FullHD cameras 
+
     reader = get_dataset_reader(config.train_dataset, config.dataset_root, **reader_kwargs)
 
     detector = FaceDetector()
     total = 0
     skipped = 0
+
     try:
         for record in reader.iter_records():
             if config.start_subject is not None:
                 if int(record.subject_id) < int(config.start_subject):
                     continue
+
             out_dir = windows_root / record.subject_id
+
             if config.skip_existing and any(out_dir.glob(f"{record.clip_id}_*.npz")):
                 skipped += 1
                 continue
+
             written = preprocess_record(record, detector)
             total += written
+
             if written:
                 print(f"{record.clip_id}: {written} windows @ {record.fps:.2f} fps")
     finally:
         detector.close()
+
     print(f"done. {total} new windows ({skipped} clips already present) -> {windows_root}")
 
 if __name__ == "__main__":
