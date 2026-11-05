@@ -11,6 +11,9 @@ processed_path = Path("D:/datasets/data/ubfc_processed")
 
 # preprocessing
 
+dataset = "ubfc"
+cameras = "FullHDwebcam"
+
 ## window
 window = 300
 stride = 150
@@ -36,7 +39,6 @@ face_margin_frac = 0.5
 # runtime
 seed = 42
 device = "cuda"
-fps_target = 30.0
 eps = 1e-6
 color = "rgb"
 
@@ -44,6 +46,7 @@ color = "rgb"
 epochs = 20
 batch_size = 10
 lr = 1e-3
+max_shift_sec = 0.33
 weight_decay = 1e-4 
 grad_clip = 1.0
 warmup_epochs = 0

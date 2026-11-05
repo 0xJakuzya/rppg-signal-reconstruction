@@ -4,15 +4,15 @@ import numpy as np
 from datasets.base import DatasetReader, Record
 
 ppg_column = 0
-cameras = ["FullHDwebcam", "IriunWebcam", "USBVideo"]
-states = ["before", "after"]
+default_cameras = ["FullHDwebcam", "IriunWebcam", "USBVideo"]
+default_states = ["before", "after"]
 
 class MCDReader(DatasetReader):
 
     def __init__(self, root: Path, cameras: list[str] = None, states: list[str] = None):
         self.root = Path(root)
-        self.cameras = list(cameras) if cameras else list(cameras)
-        self.states = list(states) if states else list(states)
+        self.cameras = list(cameras) if cameras else list(default_cameras)
+        self.states = list(states) if states else list(default_states)
 
     def video_paths(self) -> list[Path]:
         paths = []

@@ -4,7 +4,6 @@ import numpy as np
 from datasets import get_dataset_reader
 from src import config
 from src.face_detector import FaceDetector
-from src.utils import bandpass_filter, detrend, normalize_signal
 
 def missing_face():
     shape = (config.face_size, config.face_size, 3)
@@ -51,12 +50,6 @@ def diffnormalize_label(ppg):
     normalized[~np.isfinite(normalized)] = 0.0
     return normalized
 
-def prepare_label(ppg, fps):
-    ppg = detrend(ppg)
-    if len(ppg) >= int(fps * 2):
-        ppg = bandpass_filter(ppg, fps)
-    return normalize_signal(ppg)
-
 def extract_faces(video_path, detector):
     capture = cv2.VideoCapture(str(video_path))
     frames = []
@@ -82,7 +75,8 @@ def extract_faces(video_path, detector):
 def save_windows(frames, ppg, out_dir, stem, fps):
     length = min(len(frames), len(ppg))
     frames = diffnormalize_data(frames[:length])
-    ppg = diffnormalize_label(ppg[:length])
+    ppg_raw = np.asarray(ppg[:length], dtype=np.float32)
+    ppg = diffnormalize_label(ppg_raw)
     out_dir.mkdir(parents=True, exist_ok=True)
     count = 0
     start = 0
@@ -90,7 +84,8 @@ def save_windows(frames, ppg, out_dir, stem, fps):
         end = start + config.window
         window_frames = frames[start:end]
         window_ppg = ppg[start:end]
-        np.savez_compressed(out_dir / f"{stem}_{start:05d}.npz", frames=window_frames, ppg=window_ppg)
+        np.savez_compressed(out_dir / f"{stem}_{start:05d}.npz", frames=window_frames, ppg=window_ppg,
+                            ppg_raw=ppg_raw[start:end], fps=fps, start=start)
         count += 1
         start += config.stride
     return count
@@ -113,41 +108,35 @@ def preprocess_record(record, detector):
         return 0
 
     ppg = record.load_ppg(len(frames), fps)
-    out_dir = Path(config.windows_dir) / record.subject_id
+    out_dir = Path(config.processed_path) / record.subject_id
     return save_windows(frames, ppg, out_dir, record.clip_id, fps)
 
 def main():
-    windows_root = Path(config.windows_dir)
+    windows_root = Path(config.processed_path)
     reader_kwargs = {}
-    if config.cameras:
+    if config.dataset == "mcd" and config.cameras:
         reader_kwargs["cameras"] = config.cameras # FullHD cameras 
-
-    reader = get_dataset_reader(config.train_dataset, config.dataset_root, **reader_kwargs)
-
+    reader = get_dataset_reader(config.dataset, config.dataset_path, **reader_kwargs)
     detector = FaceDetector()
     total = 0
     skipped = 0
-
     try:
         for record in reader.iter_records():
-            if config.start_subject is not None:
-                if int(record.subject_id) < int(config.start_subject):
-                    continue
-
             out_dir = windows_root / record.subject_id
-
             if config.skip_existing and any(out_dir.glob(f"{record.clip_id}_*.npz")):
+                for file in out_dir.glob(f"{record.clip_id}_*.npz"):
+                    with np.load(file) as sample:
+                        if not {"ppg_raw", "fps", "start"}.issubset(sample.files):
+                            print(f"{file}: regenerate windows in a new processed_path")
+                            return
                 skipped += 1
                 continue
-
             written = preprocess_record(record, detector)
             total += written
-
             if written:
                 print(f"{record.clip_id}: {written} windows @ {record.fps:.2f} fps")
     finally:
         detector.close()
-
     print(f"done. {total} new windows ({skipped} clips already present) -> {windows_root}")
 
 if __name__ == "__main__":

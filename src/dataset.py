@@ -1,4 +1,3 @@
-import json
 import random
 from pathlib import Path
 import numpy as np
@@ -17,32 +16,15 @@ def patient_id(file):
     stem = Path(file).stem
     return stem.split("_", 1)[0]
 
-def load_val_patients(path=config.val_patients_path):
-    path = Path(path)
-    if path.exists():
-        with open(path, encoding="utf-8") as f:
-            return set(json.load(f))
-    return None
-
-def save_val_patients(patients, path=config.val_patients_path):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(sorted(patients), f, indent=2)
-
 def split_train_val(files, val_split=config.val_split, seed=config.seed):
     files_by_patient = {}
     for index, file in enumerate(files):
         files_by_patient.setdefault(patient_id(file), []).append(index)
     present = sorted(files_by_patient)
-    val_patients = load_val_patients()
-    if val_patients is None:
-        shuffled = list(present)
-        random.Random(seed).shuffle(shuffled)
-        val_count = max(1, round(len(shuffled) * val_split))
-        val_patients = set(shuffled[:val_count])
-        save_val_patients(val_patients)
-        print(f"Fixed validation set created: {len(val_patients)} patients")
+    shuffled = list(present)
+    random.Random(seed).shuffle(shuffled)
+    val_count = max(1, round(len(shuffled) * val_split))
+    val_patients = set(shuffled[:val_count])
 
     def indices_of(patient_list):
         indices = []
@@ -56,17 +38,16 @@ def split_train_val(files, val_split=config.val_split, seed=config.seed):
     return indices_of(train_present), indices_of(val_present)
 
 def build_dataloaders(dataset, train_idx, val_idx, batch_size, num_workers):
-    val_dataset = RPPGDataset(dataset.files, color_order=dataset.color_order)
+    val_dataset = RPPGDataset(dataset.files)
     train_loader = DataLoader(Subset(dataset, train_idx), batch_size=batch_size, num_workers=num_workers, shuffle=True)
     validation_loader = DataLoader(Subset(val_dataset, val_idx), batch_size=batch_size, num_workers=num_workers, shuffle=False,)
     return train_loader, validation_loader
 
 class RPPGDataset(Dataset):
-    def __init__(self, files, color_order="config"):
+    def __init__(self, files):
         self.files = []
         for file in files:
             self.files.append(str(file))
-        self.color_order = (config.color_order if color_order == "config" else color_order).lower()
 
     def __len__(self):
         return len(self.files)

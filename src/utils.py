@@ -2,6 +2,7 @@ import random
 import numpy as np
 import scipy.signal
 import scipy.sparse
+import scipy.sparse.linalg
 import torch
 from src import config
 
@@ -17,25 +18,27 @@ def detrend(signal, smoothing=config.detrend_lambda):
     length = len(signal)
     if length < 3:
         return signal.astype(np.float64)
-    identity = np.eye(length)
-    ones = np.ones(length)
-    diagonals = np.array([ones, -2 * ones, ones])
-    second_difference = scipy.sparse.spdiags(diagonals, [0, 1, 2], length - 2, length).toarray()
-    smooth = np.linalg.inv(identity + smoothing ** 2 * second_difference.T @ second_difference)
-    return (identity - smooth) @ signal.astype(np.float64)
+    identity = scipy.sparse.eye(length, format="csc")
+    ones = np.ones(length - 2)
+    second_difference = scipy.sparse.diags([ones, -2 * ones, ones], [0, 1, 2], shape=(length - 2, length), format="csc")
+    smooth = scipy.sparse.linalg.spsolve(identity + smoothing ** 2 * second_difference.T @ second_difference, signal.astype(np.float64))
+    return signal.astype(np.float64) - smooth
 
 def bandpass_filter(signal, fps, low_hz=config.band_lo_hz, high_hz=config.band_hi_hz):
-    nyquist = fps / 2.0
-    low = low_hz / nyquist
-    high = min(high_hz / nyquist, 0.999)
-    numerator, denominator = scipy.signal.cheby2(
-        config.cheby_order, config.cheby_rs, [low, high], btype="bandpass"
-    )
-    filtered = scipy.signal.filtfilt(numerator, denominator, signal.astype(np.float64))
+    if config.filter_type != "butterworth":
+        print(f"unsupported filter_type: {config.filter_type}")
+        return None
+    if not 0 < low_hz < high_hz < fps / 2.0:
+        print(f"invalid filter band {low_hz}-{high_hz} Hz for {fps} fps")
+        return None
+    sections = scipy.signal.butter(config.filter_order, [low_hz, high_hz], btype="bandpass", fs=fps, output="sos")
+    filtered = scipy.signal.sosfiltfilt(sections, signal.astype(np.float64))
     return filtered.astype(np.float32)
 
 def fft_hr(signal, fps, low_hz=config.hr_lo_hz, high_hz=config.hr_hi_hz):
     signal = np.asarray(signal, dtype=np.float64)
+    if len(signal) < 2 or not np.isfinite(signal).all() or signal.std() <= config.eps:
+        return float("nan")
     signal = signal - signal.mean()
     fft_length = 2 ** int(np.ceil(np.log2(len(signal))))
     frequencies = np.fft.rfftfreq(fft_length, d=1.0 / fps)
@@ -43,6 +46,8 @@ def fft_hr(signal, fps, low_hz=config.hr_lo_hz, high_hz=config.hr_hi_hz):
     in_band = (frequencies >= low_hz) & (frequencies <= high_hz)
     band_frequencies = frequencies[in_band]
     band_power = power[in_band]
+    if len(band_power) == 0:
+        return float("nan")
     peak_index = band_power.argmax()
     peak_freq = band_frequencies[peak_index]
     half_freq = peak_freq / 2.0
@@ -50,13 +55,12 @@ def fft_hr(signal, fps, low_hz=config.hr_lo_hz, high_hz=config.hr_hi_hz):
         near_half = np.abs(band_frequencies - half_freq) <= 0.1
         if near_half.any() and band_power[near_half].max() >= 0.5 * band_power[peak_index]:
             peak_freq = half_freq
-
     heart_rate = peak_freq * 60.0
     return float(heart_rate)
 
 def shift_corr(prediction, target, max_shift):
     length = len(prediction)
-    best = -1.0
+    best = float("nan")
     for shift in range(-max_shift, max_shift + 1):
         if shift >= 0:
             a, b = prediction[shift:], target[: length - shift]
@@ -68,22 +72,27 @@ def shift_corr(prediction, target, max_shift):
         b = b - b.mean()
         denom = np.sqrt((a * a).sum() * (b * b).sum())
         if denom > 0:
-            best = max(best, float((a * b).sum() / denom))
+            correlation = float((a * b).sum() / denom)
+            if not np.isfinite(best) or correlation > best:
+                best = correlation
     return best
 
 def hr_metrics(predictions, targets, fps, max_shift=0):
     errors = []
     correlations = []
-    for prediction, target in zip(predictions, targets):
-        predicted_hr = fft_hr(prediction, fps)
-        true_hr = fft_hr(target, fps)
+    fps = np.broadcast_to(fps, (len(predictions),))
+    max_shift = np.broadcast_to(max_shift, (len(predictions),))
+    for prediction, target, sample_fps, shift in zip(predictions, targets, fps, max_shift):
+        predicted_hr = fft_hr(prediction, sample_fps)
+        true_hr = fft_hr(target, sample_fps)
         if np.isfinite(predicted_hr) and np.isfinite(true_hr):
             errors.append(predicted_hr - true_hr)
-        if max_shift > 0:
-            correlations.append(shift_corr(prediction, target, max_shift))
+        correlation = shift_corr(prediction, target, int(shift))
+        if np.isfinite(correlation):
+            correlations.append(correlation)
     errors = np.array(errors)
-    mean_absolute_error = float(np.mean(np.abs(errors)))
-    root_mean_squared_error = float(np.sqrt(np.mean(errors ** 2)))
+    mean_absolute_error = float(np.mean(np.abs(errors))) if len(errors) else float("nan")
+    root_mean_squared_error = float(np.sqrt(np.mean(errors ** 2))) if len(errors) else float("nan")
     metrics = {
         "mae": mean_absolute_error,
         "rmse": root_mean_squared_error,
