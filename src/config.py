@@ -16,6 +16,7 @@ window = 300
 stride = 150
 frame_step = 1
 fps = 30.0
+diffnormalized_epsilon = 1e-7
 
 ## filtering
 filter_type = "butterworth"

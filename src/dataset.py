@@ -75,7 +75,5 @@ class RPPGDataset(Dataset):
         with np.load(self.files[index]) as sample:
             frames = torch.from_numpy(sample["frames"]).float()
             ppg = torch.from_numpy(sample["ppg"]).float()
-        if self.color_order == "rgb":
-            frames = frames[..., [2, 1, 0]]
         frames = frames.permute(0, 3, 1, 2).contiguous()
         return frames, ppg
