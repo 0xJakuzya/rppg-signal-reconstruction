@@ -41,21 +41,21 @@ $$
 
 where $I_t \in \mathbb{R}^{72\times72\times3}$ denotes the RGB crop at time $t$.
 
+
 The resulting difference representation is scaled by its standard deviation over the video:
 
 $$
-\widetilde D_t = \frac{D_t}{\operatorname{std}(D)},
+\widetilde{D}_t = \frac{D_t}{\mathrm{std}(D)},
 $$
 
-where $\operatorname{std}(D)$ denotes the standard deviation used by the preprocessing implementation. Normalization reduces sensitivity to recording-dependent variation in the magnitude of pixel changes.
+where $\mathrm{std}(D)$ denotes the standard deviation used by the preprocessing implementation. Normalization reduces sensitivity to recording-dependent variation in the magnitude of pixel changes.
 
 For supervised training, the reference PPG waveform $s_t$ is converted to a normalized first-order temporal difference:
 
 $$
-\Delta s_t = s_{t+1}-s_t,
+\Delta s_t = s_{t+1} - s_t,
 \qquad
-\widetilde{\Delta s}_t =
-\frac{\Delta s_t}{\operatorname{std}(\Delta s)}.
+\widetilde{\Delta s}_t = \frac{\Delta s_t}{\mathrm{std}(\Delta s)}.
 $$
 
 Thus, the training target is a **differential pulse signal**, rather than the original PPG amplitude sequence. Frame differences are naturally indexed by adjacent-frame pairs; implementations must preserve this time indexing when aligning predictions and PPG targets.
@@ -89,9 +89,12 @@ where $f_\theta$ is the learned network, $\widetilde{\mathbf D}$ is the temporal
 The model is trained with a **Pearson-correlation-based objective** that permits a temporal alignment shift of up to **±0.33 seconds** between predictions and reference targets. Conceptually, a shift-tolerant correlation objective can be written as
 
 $$
-\mathcal L_{\mathrm{corr}}
-=1-\max_{|\tau|\leq K}
-\rho\!\left(\hat{\mathbf d},\operatorname{shift}(\widetilde{\Delta\mathbf s},\tau)\right),
+\mathcal{L}_{\mathrm{corr}}
+= 1 - \max_{|\tau| \leq K}
+\rho\left(
+\hat{\mathbf{d}},
+\mathrm{shift}(\widetilde{\Delta\mathbf{s}}, \tau)
+\right),
 $$
 
 where $\rho$ is the Pearson correlation calculated on temporally overlapping samples and $K$ corresponds to approximately 0.33 seconds at the working sampling rate. This expresses the alignment-tolerant learning principle; the precise loss reduction and boundary handling should be verified against the training implementation.
